@@ -1,2 +1,4 @@
 songs/
 *.mp3
+
+*.sqlite
