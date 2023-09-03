@@ -11,9 +11,10 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 )
 
-func eval(commandLine []string, reader *bufio.Reader) (err error) {
+func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err error) {
 
 	var ffmpegCommand = []string{
 		"-i",
@@ -36,9 +37,10 @@ func eval(commandLine []string, reader *bufio.Reader) (err error) {
 		//"output%03d.ts",
 	}
 
-	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	log := logrus.WithContext(ctx)
 
 	switch commandLine[0] {
 	case "add":
@@ -65,7 +67,8 @@ func eval(commandLine []string, reader *bufio.Reader) (err error) {
 
 		id := uuid.NewMD5(uuid.NameSpaceURL, []byte(songname+artist))
 		file = strings.TrimSuffix(file, "\n")
-		p := fmt.Sprintf("songs/%s/", id)
+
+		p := path.Join("songs", id.String())
 
 		ffmpegCommand[1] = file
 		ffmpegCommand[13] = path.Join(p, ffmpegCommand[13])
@@ -85,25 +88,27 @@ func eval(commandLine []string, reader *bufio.Reader) (err error) {
 		defer tx.Commit()
 
 		if rows, _ := res.RowsAffected(); rows > 0 {
-			fmt.Println("Generating HLS data...")
+			log.WithField("file", file).Info("Generating HLS data...")
 			err = os.MkdirAll(p, os.ModePerm)
 			if err != nil {
 				return err
 			}
-			cmd := exec.Command("ffmpeg", ffmpegCommand...)
+			log.WithField("command", ffmpegCommand).Info("Running Command.")
+			cmd := exec.CommandContext(ctx, "ffmpeg", ffmpegCommand...)
 			err = cmd.Run()
 			if err != nil {
-				fmt.Printf("canceling")
+				log.Info("An error occurred, cancelling...")
 				return err
 			}
 		}
 
-		fmt.Println("Committing transaction...")
-		fmt.Println("Done!")
+		log.Info("Committing transaction...")
+		log.Info("Done!")
 
+	case "delete": // WARNING: hard deletions
+        
 	case "toggle": // deletions are soft, no need for hard deletions
-
-		err := eval([]string{"all"}, reader)
+		err := eval(ctx, []string{"all"}, reader)
 		if err != nil {
 			return err
 		}
@@ -151,7 +156,7 @@ func eval(commandLine []string, reader *bufio.Reader) (err error) {
 			return err
 		}
 
-		fmt.Printf("Done, affected %d rows.\n", affected)
+		log.WithField("affected-rows", affected).Info("Done.")
 
 	case "all":
 		tx, rows, err := repo.All(ctx)

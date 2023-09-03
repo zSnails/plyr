@@ -2,23 +2,45 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"database/sql"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"regexp"
+	"strings"
+	"unicode"
 
 	"github.com/gorilla/mux"
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/mattn/go-sqlite3"
+	"github.com/sirupsen/logrus"
 )
 
 var repo SongRepo
 
+var re = regexp.MustCompile(`[^a-zA-Z0-9áéíóúÁÉÍÓÚ]`)
+
+func removeSpecialCharacters(input string) string {
+	result := re.ReplaceAllString(input, "")
+	return strings.ToLowerSpecial(unicode.AzeriCase, result)
+}
+
 func init() {
+	logrus.SetLevel(logrus.InfoLevel)
+	logrus.SetOutput(os.Stdout)
 	repo = NewRepo()
-	if err := repo.Open("sqlite3", "data.sqlite?cache=shared&mode=rwc"); err != nil {
+
+	sql.Register("sqlite3_custom", &sqlite3.SQLiteDriver{
+		ConnectHook: func(conn *sqlite3.SQLiteConn) error {
+			if err := conn.RegisterFunc("remove_special_characters", removeSpecialCharacters, false); err != nil {
+				return err
+			}
+			return nil
+		},
+	})
+
+	if err := repo.Open("sqlite3_custom", "data.sqlite?cache=shared&mode=rwc"); err != nil {
 		panic(err)
 	}
 }
@@ -34,26 +56,25 @@ func filter[T any](s []T, fn func(T) bool) (result []T) {
 }
 
 func main() {
-	// configure the songs directory name and port
-	const songsDir = "songs"
-	const port = 8080
 	defer repo.Close()
 
 	r := mux.NewRouter()
-	// add a handler for the song files
 
-	// Music file server
-	r.HandleFunc("/song/{songName}", songHandler)
 	r.HandleFunc("/song/all", allSongs)
-	r.Handle("/{hash}/{file}", deletedMW(http.FileServer(http.Dir(songsDir))))
+	r.HandleFunc("/song/{songName}", songHandler)
+	r.Handle("/{hash}/{file}", deletedMW(http.FileServer(http.Dir("songs"))))
+	r.Use(loggerMW)
 
-	// serve and log errors
+	ctx := context.Background()
+
+	log := logrus.WithContext(ctx)
+
 	go func() {
-		log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", port), r))
+		logrus.Fatal(http.ListenAndServe(":8080", r))
 	}()
 	inputReader := bufio.NewReader(os.Stdin)
 	for { // Server menu
-		fmt.Print("> ")
+		fmt.Print(">>> ")
 		line, err := inputReader.ReadString('\n')
 		if err == io.EOF {
 			fmt.Println()
@@ -71,9 +92,10 @@ func main() {
 		// TODO: implement an actual command line, the original idea was to
 		// parse the command line and extract its arguments, however I got
 		// carried away and didn't actually do that
-		err = eval(commandLine, inputReader)
+		err = eval(ctx, commandLine, inputReader)
 		if err != nil {
-			panic(err)
+			log.Error(err)
+			fmt.Print(">>> ")
 		}
 	}
 }

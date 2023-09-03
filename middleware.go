@@ -4,16 +4,30 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/sirupsen/logrus"
 )
+
+func loggerMW(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logrus.WithContext(r.Context()).WithFields(logrus.Fields{
+			"host":           r.Host,
+			"remote-address": r.RemoteAddr,
+			"request-uri":    r.RequestURI,
+		}).Info()
+		h.ServeHTTP(w, r)
+	})
+}
 
 func deletedMW(h http.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		// Check if the song has been deleted, if so then don't allow access to it
 		vars := mux.Vars(r)
+		log := logrus.WithContext(r.Context()).WithField("hash", vars["hash"])
 
 		tx, row, err := repo.FindByHash(r.Context(), vars["hash"])
 		if err != nil {
+			log.Error(err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -21,14 +35,15 @@ func deletedMW(h http.Handler) http.HandlerFunc {
 		defer tx.Commit()
 
 		var song SongData
-		// err = row.Scan(&song.Id, &song.Title, &song.Artist, &song.Hash, &song.Deleted)
 		err = song.FromRow(row)
 		if err != nil {
+			log.Error(err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
 		if song.Deleted {
+			log.Warnf("Trying to access a deleted song.")
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
