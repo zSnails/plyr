@@ -10,9 +10,9 @@ import (
 func loggerMW(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logrus.WithContext(r.Context()).WithFields(logrus.Fields{
-			"host":           r.Host,
 			"remote-address": r.RemoteAddr,
 			"request-uri":    r.RequestURI,
+			"user-agent":     r.Header.Get("User-Agent"),
 		}).Info()
 		h.ServeHTTP(w, r)
 	})
