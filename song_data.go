@@ -7,7 +7,7 @@ import (
 )
 
 type SongData struct {
-	Id      int    `json:"id"`
+	Id      int64  `json:"id"`
 	Title   string `json:"title"`
 	Artist  string `json:"artist"`
 	Hash    string `json:"hash"`
