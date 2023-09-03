@@ -41,7 +41,7 @@ func init() {
 	})
 
 	if err := repo.Open("sqlite3_custom", "data.sqlite?cache=shared&mode=rwc"); err != nil {
-		panic(err)
+		logrus.Panic(err)
 	}
 }
 
