@@ -18,7 +18,7 @@ func (c *SongRepo) Close() {
 }
 
 func (s *SongRepo) Open(driverName, dataSourceName string) (err error) {
-	db, err := sql.Open("sqlite3", "data.sqlite")
+	db, err := sql.Open(driverName, dataSourceName)
 	if err != nil {
 		return
 	}
@@ -41,9 +41,10 @@ func (s *SongRepo) FindAlike(ctx context.Context, query string) (tx *sql.Tx, row
 	if err != nil {
 		return
 	}
+	// SELECT count(*) FROM enrondata1 WHERE content MATCH 'linux';
 	queryString := `SELECT * FROM songs
-                        WHERE LOWER(title) LIKE '%' || LOWER(?) || '%' 
-                           OR LOWER(artist) LIKE '%' || LOWER(?) || '%' 
+                        WHERE remove_special_characters(title) LIKE '%' || remove_special_characters(?) || '%' 
+                           OR remove_special_characters(artist) LIKE '%' || remove_special_characters(?) || '%' 
                            OR hash = ?`
 	rows, err = tx.QueryContext(ctx, queryString, query, query, query)
 	if err != nil {
