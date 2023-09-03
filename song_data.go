@@ -7,11 +7,13 @@ import (
 )
 
 type SongData struct {
-	Id      int64  `json:"id"`
-	Title   string `json:"title"`
-	Artist  string `json:"artist"`
-	Hash    string `json:"hash"`
-	Deleted bool   `json:"-"`
+	Id       int64  `json:"id"`
+	Title    string `json:"title"`
+	Artist   string `json:"artist"`
+	Hash     string `json:"hash"`
+	Duration int64  `json:"duration"`
+	Genre    string `json:"genre"`
+	Deleted  bool   `json:"-"`
 }
 
 var (
@@ -31,5 +33,5 @@ type scanner interface {
 }
 
 func (s *SongData) FromRow(row scanner) error {
-	return row.Scan(&s.Id, &s.Title, &s.Artist, &s.Hash, &s.Deleted)
+	return row.Scan(&s.Id, &s.Title, &s.Artist, &s.Hash, &s.Duration, &s.Genre, &s.Deleted)
 }
