@@ -31,11 +31,11 @@ func removeSpecialCharacters(input string) string {
 }
 
 func init() {
-	flag.StringVar(&songsDirectory, "songs-directory", "songs", "The directory where the processed songs will be stored")
+	flag.StringVar(&songsDirectory, "songs-directory", "processed", "The directory where the processed songs will be stored")
 	flag.StringVar(&port, "port", "8080", "The port where the server will listen")
 	flag.Parse()
 
-	logrus.SetLevel(logrus.InfoLevel)
+	logrus.SetLevel(logrus.DebugLevel)
 	logrus.SetOutput(os.Stdout)
 	repo = NewRepo()
 
@@ -70,19 +70,18 @@ func main() {
 
 	s := r.PathPrefix("/song").Subrouter()
 	{
-		s.HandleFunc("/all", allSongs)
+		s.HandleFunc("", allSongs)
 		s.HandleFunc("/{songName}", songHandler)
 	}
 	s.Use(loggerMW)
-
-	r.Handle("/{hash}/{file}", deletedMW(http.FileServer(http.Dir("songs"))))
+	r.Handle("/{hash}/{file}", deletedMW(http.FileServer(http.Dir(songsDirectory))))
 
 	ctx := context.Background()
 
 	log := logrus.WithContext(ctx)
 
 	go func() {
-		logrus.Fatal(http.ListenAndServe(":8080", r))
+		logrus.Fatal(http.ListenAndServe(":"+port, r))
 	}()
 	inputReader := bufio.NewReader(os.Stdin)
 	for { // Server menu
@@ -107,7 +106,6 @@ func main() {
 		err = eval(ctx, commandLine, inputReader)
 		if err != nil {
 			log.Error(err)
-			fmt.Print(">>> ")
 		}
 	}
 }
