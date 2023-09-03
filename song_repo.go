@@ -97,6 +97,25 @@ func (s *SongRepo) Update(ctx context.Context, song SongData) (tx *sql.Tx, res s
 	return
 }
 
+func (s *SongRepo) Delete(ctx context.Context, song SongData) (tx *sql.Tx, res sql.Result, err error) {
+	tx, err = s.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return
+	}
+
+	stmt, err := tx.PrepareContext(ctx, "DELETE FROM songs WHERE id = ?")
+	if err != nil {
+		return
+	}
+	defer stmt.Close()
+
+	res, err = tx.StmtContext(ctx, stmt).Exec(song.Id)
+	if err != nil {
+		return
+	}
+	return
+}
+
 func (s *SongRepo) Store(ctx context.Context, song SongData) (tx *sql.Tx, res sql.Result, err error) {
 	tx, err = s.conn.BeginTx(ctx, nil)
 	if err != nil {
