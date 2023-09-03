@@ -43,10 +43,10 @@ func (s *SongRepo) FindAlike(ctx context.Context, query string) (tx *sql.Tx, row
 	}
 	// SELECT count(*) FROM enrondata1 WHERE content MATCH 'linux';
 	queryString := `SELECT * FROM songs
-                        WHERE remove_special_characters(title) LIKE '%' || remove_special_characters(?) || '%' 
-                           OR remove_special_characters(artist) LIKE '%' || remove_special_characters(?) || '%' 
-                           OR hash = ?`
-	rows, err = tx.QueryContext(ctx, queryString, query, query, query)
+                        WHERE (remove_special_characters(title) LIKE '%' || remove_special_characters($1) || '%' 
+                           OR remove_special_characters(artist) LIKE '%' || remove_special_characters($1) || '%' 
+                           OR hash = $1)`
+	rows, err = tx.QueryContext(ctx, queryString, query)
 	if err != nil {
 		return
 	}
@@ -122,13 +122,13 @@ func (s *SongRepo) Store(ctx context.Context, song SongData) (tx *sql.Tx, res sq
 		return
 	}
 
-	stmt, err := tx.PrepareContext(ctx, "INSERT OR IGNORE INTO songs (title, artist, hash, deleted) VALUES (?, ?, ?, FALSE)")
+	stmt, err := tx.PrepareContext(ctx, "INSERT OR IGNORE INTO songs (title, artist, hash, duration, genre, deleted) VALUES (?, ?, ?, ?, ?, FALSE)")
 	if err != nil {
 		return
 	}
 	defer stmt.Close()
 
-	res, err = tx.StmtContext(ctx, stmt).Exec(song.Title, song.Artist, song.Hash)
+	res, err = tx.StmtContext(ctx, stmt).Exec(song.Title, song.Artist, song.Hash, song.Duration, song.Genre)
 	if err != nil {
 		return
 	}
