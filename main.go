@@ -84,7 +84,7 @@ func main() {
 			fmt.Println()
 			break
 		} else if err != nil {
-			panic(err)
+			logrus.Panic(err)
 		}
 
 		r := regexp.MustCompile(`[^\s"]+|"([^"]*)"`)
