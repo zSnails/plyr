@@ -5,3 +5,8 @@ building this is for a college course so I'm probably never going to maintain it
 after I'm done.
 
 That's all the readme, I don't really care about this.
+
+# TODO
+
+[ ] - Store song length
+[ ] - Store song cover art
