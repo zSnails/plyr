@@ -106,7 +106,58 @@ func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err 
 		log.Info("Done!")
 
 	case "delete": // WARNING: hard deletions
-        
+		err := eval(ctx, []string{"all"}, reader)
+		if err != nil {
+			return err
+		}
+		fmt.Print("Id> ")
+		id, err := reader.ReadString('\n')
+		if err != nil {
+			return err
+		}
+		id = strings.TrimSuffix(id, "\n")
+		uid, err := strconv.Atoi(id)
+		if err != nil {
+			return err
+		}
+
+		tx, row, err := repo.FindById(ctx, int64(uid))
+		if err != nil {
+			return err
+		}
+		var found SongData
+
+		err = found.FromRow(row)
+		if err != nil {
+			return err
+		}
+
+		err = tx.Commit()
+		if err != nil {
+			return err
+		}
+
+		tx, res, err := repo.Delete(ctx, found)
+		if err != nil {
+			return err
+		}
+		defer tx.Commit()
+
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+
+		if affected > 0 {
+			log.Info("Song deleted from database. Deleting local files.")
+			err = os.RemoveAll(path.Join("songs", found.Hash))
+			if err != nil {
+				return err
+			}
+		} else {
+			log.Info("Nothing to delete.")
+		}
+
 	case "toggle": // deletions are soft, no need for hard deletions
 		err := eval(ctx, []string{"all"}, reader)
 		if err != nil {

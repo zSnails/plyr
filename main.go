@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,16 +18,23 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var repo SongRepo
-
-var re = regexp.MustCompile(`[^a-zA-Z0-9áéíóúÁÉÍÓÚ]`)
+var (
+	reg            = regexp.MustCompile(`[^a-zA-Z0-9áéíóúÁÉÍÓÚ]`)
+	repo           SongRepo
+	songsDirectory string
+	port           string
+)
 
 func removeSpecialCharacters(input string) string {
-	result := re.ReplaceAllString(input, "")
+	result := reg.ReplaceAllString(input, "")
 	return strings.ToLowerSpecial(unicode.AzeriCase, result)
 }
 
 func init() {
+	flag.StringVar(&songsDirectory, "songs-directory", "songs", "The directory where the processed songs will be stored")
+	flag.StringVar(&port, "port", "8080", "The port where the server will listen")
+	flag.Parse()
+
 	logrus.SetLevel(logrus.InfoLevel)
 	logrus.SetOutput(os.Stdout)
 	repo = NewRepo()
@@ -65,9 +73,9 @@ func main() {
 		s.HandleFunc("/all", allSongs)
 		s.HandleFunc("/{songName}", songHandler)
 	}
+	s.Use(loggerMW)
 
 	r.Handle("/{hash}/{file}", deletedMW(http.FileServer(http.Dir("songs"))))
-	r.Use(loggerMW)
 
 	ctx := context.Background()
 
