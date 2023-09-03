@@ -1,4 +1,9 @@
 songs/
 *.mp3
+*.opus
+*.webm
+*.m4a
+*.mkv
+plyr
 
 *.sqlite
