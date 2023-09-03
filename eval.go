@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,7 +11,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dhowden/tag"
 	"github.com/google/uuid"
+	"github.com/hajimehoshi/go-mp3"
 	"github.com/sirupsen/logrus"
 )
 
@@ -40,45 +43,95 @@ func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	log := logrus.WithContext(ctx)
+	log := logrus.WithContext(ctx).WithField("command", commandLine[0])
 
 	switch commandLine[0] {
 	case "add":
 
-		fmt.Print("Song Name> ")
-		songname, err := reader.ReadString('\n')
-		if err != nil {
-			return err
-		}
-		songname = strings.TrimSuffix(songname, "\n")
-
-		fmt.Print("Artist> ")
-		artist, err := reader.ReadString('\n')
-		if err != nil {
-			return err
-		}
-		artist = strings.TrimSuffix(artist, "\n")
-
 		fmt.Print("File> ")
-		file, err := reader.ReadString('\n')
+		filename, err := reader.ReadString('\n')
 		if err != nil {
 			return err
 		}
+		filename = strings.TrimSuffix(filename, "\n")
+
+		if path.Ext(filename) != ".mp3" {
+			return errors.New("Only mp3 files are supported.")
+		}
+
+		log.WithField("filename", filename).Info("Opening file.")
+
+		file, err := os.Open(filename)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		meta, err := tag.ReadFrom(file)
+		if err != nil {
+			return err
+		}
+
+		// XXX: getting song duration from file
+		decoder, err := mp3.NewDecoder(file)
+		if err != nil {
+			return err
+		}
+
+		samples := decoder.Length() / 4
+		duration := samples / int64(decoder.SampleRate())
+
+		songname := meta.Title()
+		if songname == "" {
+			log.Infoln("Could not read song name from file.")
+			fmt.Print("Song Name> ")
+			songname, err = reader.ReadString('\n')
+			if err != nil {
+				return err
+			}
+			songname = strings.TrimSuffix(songname, "\n")
+		}
+
+		artist := meta.Artist()
+		if artist == "" {
+			log.Infoln("Could not read song artist from file.")
+			fmt.Print("Artist> ")
+			artist, err = reader.ReadString('\n')
+			if err != nil {
+				return err
+			}
+			artist = strings.TrimSuffix(artist, "\n")
+		}
+
+		genre := meta.Genre()
+		if genre == "" {
+			log.Infoln("Could not read song genre from file.")
+			fmt.Print("Genre> ")
+			genre, err = reader.ReadString('\n')
+			if err != nil {
+				return err
+			}
+			genre = strings.TrimSuffix(genre, "\n")
+		}
+
+		fmt.Printf("songLength: %v\n", duration)
 
 		id := uuid.NewMD5(uuid.NameSpaceURL, []byte(songname+artist))
-		file = strings.TrimSuffix(file, "\n")
+		log.Infof("Assigned uuid(%s) to song\n", id)
 
-		p := path.Join("songs", id.String())
+		p := path.Join(songsDirectory, id.String())
 
-		ffmpegCommand[1] = file
+		ffmpegCommand[1] = filename
 		ffmpegCommand[13] = path.Join(p, ffmpegCommand[13])
 		ffmpegCommand[16] = path.Join(p, "output%03d.ts")
 
 		song := SongData{
-			Title:   songname,
-			Artist:  artist,
-			Hash:    id.String(),
-			Deleted: false,
+			Title:    songname,
+			Artist:   artist,
+			Hash:     id.String(),
+			Duration: duration,
+			Genre:    genre,
+			Deleted:  false,
 		}
 
 		tx, res, err := repo.Store(ctx, song)
@@ -88,12 +141,12 @@ func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err 
 		defer tx.Commit()
 
 		if rows, _ := res.RowsAffected(); rows > 0 {
-			log.WithField("file", file).Info("Generating HLS data...")
+			log.WithField("file", filename).Info("Generating HLS data...")
 			err = os.MkdirAll(p, os.ModePerm)
 			if err != nil {
 				return err
 			}
-			log.WithField("command", ffmpegCommand).Info("Running Command.")
+			log.WithField("command", fmt.Sprintf("ffmpeg %s", ffmpegCommand)).Info("Running Command.")
 			cmd := exec.CommandContext(ctx, "ffmpeg", ffmpegCommand...)
 			err = cmd.Run()
 			if err != nil {
@@ -106,6 +159,7 @@ func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err 
 		log.Info("Done!")
 
 	case "delete": // WARNING: hard deletions
+		log.Warn("This action is irreversible. Be careful!")
 		err := eval(ctx, []string{"all"}, reader)
 		if err != nil {
 			return err
@@ -150,7 +204,9 @@ func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err 
 
 		if affected > 0 {
 			log.Info("Song deleted from database. Deleting local files.")
-			err = os.RemoveAll(path.Join("songs", found.Hash))
+			localPath := path.Join(songsDirectory, found.Hash)
+			log.WithField("local-path", localPath).Println()
+			err = os.RemoveAll(localPath)
 			if err != nil {
 				return err
 			}
