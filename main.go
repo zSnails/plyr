@@ -60,8 +60,12 @@ func main() {
 
 	r := mux.NewRouter()
 
-	r.HandleFunc("/song/all", allSongs)
-	r.HandleFunc("/song/{songName}", songHandler)
+	s := r.PathPrefix("/song").Subrouter()
+	{
+		s.HandleFunc("/all", allSongs)
+		s.HandleFunc("/{songName}", songHandler)
+	}
+
 	r.Handle("/{hash}/{file}", deletedMW(http.FileServer(http.Dir("songs"))))
 	r.Use(loggerMW)
 
