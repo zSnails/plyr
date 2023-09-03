@@ -5,6 +5,8 @@ CREATE TABLE songs (
     title text,
     artist text,
     hash text unique,
+    duration integer,
+    genre text,
     deleted bool
 );
 COMMIT;
