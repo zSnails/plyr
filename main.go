@@ -81,7 +81,7 @@ func main() {
 	log := logrus.WithContext(ctx)
 
 	go func() {
-		logrus.Fatal(http.ListenAndServe(":"+port, r))
+		log.Fatal(http.ListenAndServe(":"+port, r))
 	}()
 	inputReader := bufio.NewReader(os.Stdin)
 	for { // Server menu
