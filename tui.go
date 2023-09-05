@@ -2,9 +2,16 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"os/exec"
 	"path"
 
+	"github.com/dhowden/tag"
 	"github.com/gdamore/tcell/v2"
+	"github.com/google/uuid"
+	"github.com/hajimehoshi/go-mp3"
+	"github.com/lithammer/fuzzysearch/fuzzy"
 	"github.com/rivo/tview"
 	"github.com/sirupsen/logrus"
 )
@@ -15,13 +22,15 @@ type App struct {
 }
 
 type State struct {
-	cachedsongs []SongData
-	pages       *tview.Pages
-	songsPage   *tview.List
-	songsForm   *tview.Form
-	flex        *tview.Flex
-	logs        *tview.TextView
-	repo        *SongRepo
+	CachedSongs  []SongData
+	Pages        *tview.Pages
+	SongsList    *tview.List
+	SongsFlexBox *tview.Flex
+	SongsForm    *tview.Form
+	Flex         *tview.Flex
+	Logs         *tview.TextView
+	Repo         *SongRepo
+	app          *App
 }
 
 func (a *App) OnInput(event *tcell.EventKey) *tcell.EventKey {
@@ -29,141 +38,145 @@ func (a *App) OnInput(event *tcell.EventKey) *tcell.EventKey {
 	case rune(tcell.KeyCtrlQ):
 		a.ui.Stop()
 	case rune(tcell.KeyCtrlA):
-		current := a.pages.GetTitle()
-		logrus.Debug(current)
-		if current == "Songs Form" {
-			logrus.Warn("Already there")
-			return event
-		}
-		logrus.Debug("Pressed Ctrl+a")
+		a.SongsForm.Clear(true)
 
 		var filename string
-		a.songsForm.AddInputField("Song File", "", 10, nil, func(text string) {
+
+		a.SongsForm.AddInputField("Song File", "", 10, nil, func(text string) {
 			filename = text
-			logrus.Debug(filename)
 		})
-		a.songsForm.AddButton("accept", func() {
+
+		a.SongsForm.AddButton("Save", func() {
 			if path.Ext(filename) != ".mp3" {
 				logrus.Error("Only mp3 files are supported.")
 			} else {
-				a.songsForm.Clear(true)
-				a.AddSong(filename)
+				a.AddSongModal(filename)
 			}
 		})
-		a.pages.SwitchToPage("Songs Form")
+
+		a.SongsForm.AddButton("Cancel", func() {
+			a.Pages.SwitchToPage("Songs")
+		})
+		a.Pages.SwitchToPage("Songs Form")
+		a.SongsForm.SetFocus(0)
 	}
 	return event
 }
 
-func (a *App) AddSong(filename string) {
-	// fmt.Print("File> ")
+func (a *App) AddSongModal(filename string) {
 
-	// log.WithField("filename", filename).Info("Opening file.")
+	a.SongsForm.Clear(true)
+	log := logrus.WithField("file", filename)
 
-	// file, err := os.Open(filename)
-	// if err != nil {
-	// 	return err
-	// }
-	// defer file.Close()
+	log.Debug("Opening")
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+	defer file.Close()
 
-	// meta, err := tag.ReadFrom(file)
-	// if err != nil {
-	// 	return err
-	// }
+	log.Debug("Reading tags")
+	meta, err := tag.ReadFrom(file)
+	if err != nil {
+		log.Error(err)
+		return
+	}
 
-	// // XXX: getting song duration from file
-	// decoder, err := mp3.NewDecoder(file)
-	// if err != nil {
-	// 	return err
-	// }
+	log.Debug("Decoding")
+	decoder, err := mp3.NewDecoder(file)
+	if err != nil {
+		log.Error(err)
+		return
+	}
 
-	// samples := decoder.Length() / 4
-	// duration := samples / int64(decoder.SampleRate())
+	samples := decoder.Length() / 4
+	duration := samples / int64(decoder.SampleRate())
 
-	// songname := meta.Title()
-	// if songname == "" {
-	// 	log.Infoln("Could not read song name from file.")
-	// 	fmt.Print("Song Name> ")
-	// 	songname, err = reader.ReadString('\n')
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	songname = strings.TrimSuffix(songname, "\n")
-	// }
+	song := SongData{
+		Duration: duration,
+		Deleted:  false,
+	}
 
-	// artist := meta.Artist()
-	// if artist == "" {
-	// 	log.Infoln("Could not read song artist from file.")
-	// 	fmt.Print("Artist> ")
-	// 	artist, err = reader.ReadString('\n')
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	artist = strings.TrimSuffix(artist, "\n")
-	// }
+	song.Title = meta.Title()
 
-	// genre := meta.Genre()
-	// if genre == "" {
-	// 	log.Infoln("Could not read song genre from file.")
-	// 	fmt.Print("Genre> ")
-	// 	genre, err = reader.ReadString('\n')
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	genre = strings.TrimSuffix(genre, "\n")
-	// }
+	a.SongsForm.AddInputField("Name", song.Title, 10, nil, func(text string) {
+		song.Title = text
+		log.Debug(song.Title)
+	})
 
-	// fmt.Printf("songLength: %v\n", duration)
+	song.Artist = meta.Artist()
 
-	// id := uuid.NewMD5(uuid.NameSpaceURL, []byte(songname+artist))
-	// log.Infof("Assigned uuid(%s) to song\n", id)
+	a.SongsForm.AddInputField("Artist", song.Artist, 10, nil, func(text string) {
+		song.Artist = text
+		log.Debug(song.Artist)
+	})
 
-	// p := path.Join(songsDirectory, id.String())
+	song.Genre = meta.Genre()
 
-	// ffmpegCommand[1] = filename
-	// ffmpegCommand[13] = path.Join(p, ffmpegCommand[13])
-	// ffmpegCommand[16] = path.Join(p, "output%03d.ts")
+	a.SongsForm.AddInputField("Genre", song.Genre, 10, nil, func(text string) {
+		song.Genre = text
+		log.Debug(song.Genre)
+	})
 
-	// song := SongData{
-	// 	Title:    songname,
-	// 	Artist:   artist,
-	// 	Hash:     id.String(),
-	// 	Duration: duration,
-	// 	Genre:    genre,
-	// 	Deleted:  false,
-	// }
+	log.WithField("duration", duration).Debug()
 
-	// tx, res, err := repo.Store(ctx, song)
-	// if err != nil {
-	// 	return err
-	// }
-	// defer tx.Commit()
+	a.SongsForm.AddButton("Save", func() {
+		a.Pages.SwitchToPage("Songs")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		defer logrus.Debug("Canceling local context")
+		song.Hash = uuid.NewMD5(uuid.NameSpaceURL, []byte(song.Title+song.Artist)).String()
+		log.Infof("Assigned uuid(%s) to song\n", song.Hash)
 
-	// if rows, _ := res.RowsAffected(); rows > 0 {
-	// 	log.WithField("file", filename).Info("Generating HLS data...")
-	// 	err = os.MkdirAll(p, os.ModePerm)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	log.WithField("command", fmt.Sprintf("ffmpeg %s", ffmpegCommand)).Info("Running Command.")
-	// 	cmd := exec.CommandContext(ctx, "ffmpeg", ffmpegCommand...)
-	// 	err = cmd.Run()
-	// 	if err != nil {
-	// 		log.Info("An error occurred, cancelling...")
-	// 		return err
-	// 	}
-	// }
+		p := path.Join(songsDirectory, song.Hash)
 
-	// log.Info("Committing transaction...")
-	// log.Info("Done!")
+		command := buildFfmpegCommand(p, filename)
+
+		tx, res, err := repo.Store(ctx, song)
+		if err != nil {
+			log.Error(err)
+			return
+		}
+		defer log.Info("Committing transaction...")
+		defer tx.Commit()
+
+		if rows, _ := res.RowsAffected(); rows > 0 {
+			song.Id, err = res.LastInsertId()
+			if err != nil {
+				log.Error(err)
+				return
+			}
+
+			log.WithField("file", filename).Info("Generating HLS data...")
+			err = os.MkdirAll(p, os.ModePerm)
+			if err != nil {
+				log.Error(err)
+				return
+			}
+
+			log.WithField("command", fmt.Sprintf("ffmpeg %s", command)).Info("Running Command.")
+			cmd := exec.CommandContext(ctx, "ffmpeg", command...)
+			err = cmd.Run()
+			if err != nil {
+				log.Error(err)
+				return
+			}
+			log.Info("Created local processed files.")
+			log.Debug("Adding new song to songs cache.")
+			a.AddSong(song)
+		}
+
+		log.Info("Done!")
+	})
 }
 
 func (s *State) SetSongRepo(repo *SongRepo) {
-	s.repo = repo
+	s.Repo = repo
 }
 
 func (s *State) CacheSongs() error {
-	tx, rows, err := s.repo.All(context.Background())
+	tx, rows, err := s.Repo.All(context.Background())
 	if err != nil {
 		return err
 	}
@@ -177,11 +190,42 @@ func (s *State) CacheSongs() error {
 }
 
 func (s *State) AddSong(song SongData) {
-	s.cachedsongs = append(s.cachedsongs, song)
-	s.songsPage.AddItem(song.Title, song.Artist, rune(song.Id), func() {
-		logrus.Debugf("Clicked %s\n", song)
-		s.songsPage.SetTitle(song.Title)
+	s.CachedSongs = append(s.CachedSongs, song)
+	s.SongsAppend(song)
+}
+
+func (s *State) SongsAppend(song SongData) {
+	s.SongsList.AddItem(fmt.Sprintf("%s - %s", song.Artist, song.Title), song.Hash, rune(song.Title[0]), func() {
+		s.app.DeleteSongModal(song)
 	})
+}
+
+// The filter songs function does a fuzzy search
+func (s *State) FilterSongs(query string) {
+	results := filter(s.CachedSongs, func(sd SongData) bool {
+		return fuzzy.Match(removeSpecialCharacters(query), removeSpecialCharacters(sd.Title+sd.Artist))
+	})
+
+	s.SongsList.Clear()
+	for _, song := range results {
+		s.SongsAppend(song)
+	}
+}
+
+func (s *App) DeleteSongModal(song SongData) {
+	modal := tview.NewModal()
+	modal.SetTitle("Importante!")
+	modal.SetText("Seguro que quieres borrar esta canción?")
+	modal.AddButtons([]string{"Si", "No"})
+	modal.SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+		if buttonIndex == 1 {
+			s.Pages.SwitchToPage("Songs")
+			s.Pages.RemovePage("modal")
+		}
+		s.Repo.Delete(context.Background(), song)
+	})
+	s.Pages.AddPage("modal", modal, true, true)
+	s.Pages.SwitchToPage("modal")
 }
 
 func newApp() *App {
@@ -189,41 +233,59 @@ func newApp() *App {
 	app := &App{
 		ui: tview.NewApplication(),
 		State: &State{
-			cachedsongs: []SongData{},
-			pages:       tview.NewPages(),
-			songsPage:   tview.NewList(),
-			songsForm:   tview.NewForm(),
-			flex:        tview.NewFlex(),
-			logs:        tview.NewTextView(),
-			repo:        &SongRepo{},
+			CachedSongs:  []SongData{},
+			Pages:        tview.NewPages(),
+			SongsFlexBox: tview.NewFlex(),
+			SongsList:    tview.NewList(),
+			SongsForm:    tview.NewForm(),
+			Flex:         tview.NewFlex(),
+			Logs:         tview.NewTextView(),
+			Repo:         &SongRepo{},
 		},
 	}
 
 	app.ui.EnableMouse(true)
 	app.ui.SetInputCapture(app.OnInput)
 
-	app.songsPage.SetBorder(true)
-	app.songsPage.SetTitle("Songs")
+	app.SongsList.SetBorder(true)
+	app.SongsList.SetTitle("Songs")
 
-	app.songsForm.SetBorder(true)
-	app.songsForm.SetTitle("Songs Form")
+	app.SongsFlexBox.AddItem(tview.NewForm().AddInputField("Search", "", 20, nil, func(text string) {
+		app.FilterSongs(text)
+	}), 0, 1, true)
 
-	app.logs.SetBorder(true)
-	app.logs.SetDynamicColors(true)
-	app.logs.SetTitle("Logs")
-	app.logs.SetScrollable(true)
+	app.SongsFlexBox.SetDirection(tview.FlexRow)
 
-	app.logs.SetChangedFunc(func() {
-		app.ui.Draw()
-		app.logs.ScrollToEnd()
+	app.SongsFlexBox.AddItem(app.SongsList, 0, 12, false)
+
+	app.SongsForm.SetBorder(true)
+	app.SongsForm.SetTitle("Songs Form")
+	app.SongsForm.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Rune() {
+		case rune(tcell.KeyESC):
+			app.Pages.SwitchToPage("Songs")
+		}
+		return event
 	})
 
-	app.pages.AddAndSwitchToPage("Songs", app.songsPage, true)
-	app.pages.AddPage("Songs Form", app.songsForm, true, false)
+	app.Logs.SetBorder(true)
+	app.Logs.SetDynamicColors(true)
+	app.Logs.SetTitle("Logs")
+	app.Logs.SetScrollable(true)
 
-	app.flex.AddItem(app.pages, 0, 1, true)
-	app.flex.AddItem(app.logs, 0, 2, false)
-	app.ui.SetRoot(app.flex, true)
+	app.Logs.SetChangedFunc(func() {
+		app.ui.Draw()
+		app.Logs.ScrollToEnd()
+	})
+
+	app.Pages.AddAndSwitchToPage("Songs", app.SongsFlexBox, true)
+	app.Pages.AddPage("Songs Form", app.SongsForm, true, false)
+
+	app.Flex.AddItem(app.Pages, 0, 1, true)
+	app.Flex.AddItem(app.Logs, 0, 2, false)
+	app.ui.SetRoot(app.Flex, true)
+
+	app.State.app = app
 
 	return app
 }
