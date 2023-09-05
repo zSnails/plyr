@@ -100,9 +100,7 @@ func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err 
 
 		p := path.Join(songsDirectory, id.String())
 
-		ffmpegCommand[1] = filename
-		ffmpegCommand[13] = path.Join(p, ffmpegCommand[13])
-		ffmpegCommand[16] = path.Join(p, "output%03d.ts")
+		command := buildFfmpegCommand(p, filename)
 
 		song := SongData{
 			Title:    songname,
@@ -125,8 +123,8 @@ func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err 
 			if err != nil {
 				return err
 			}
-			log.WithField("command", fmt.Sprintf("ffmpeg %s", ffmpegCommand)).Info("Running Command.")
-			cmd := exec.CommandContext(ctx, "ffmpeg", ffmpegCommand...)
+			log.WithField("command", fmt.Sprintf("ffmpeg %s", command)).Info("Running Command.")
+			cmd := exec.CommandContext(ctx, "ffmpeg", command...)
 			err = cmd.Run()
 			if err != nil {
 				log.Info("An error occurred, cancelling...")
