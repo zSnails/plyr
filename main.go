@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"flag"
 	"net/http"
+	"path"
 	"regexp"
 	"strings"
-	"unicode"
 
 	"github.com/gorilla/mux"
 	"github.com/mattn/go-sqlite3"
@@ -20,10 +20,12 @@ var (
 	songsDirectory string
 	port           string
 	app            *App
+)
 
-	ffmpegCommand = []string{
+func buildFfmpegCommand(pth, filename string) []string {
+	return []string{
 		"-i",
-		"", // 1
+		filename,
 		"-c:a",
 		"libmp3lame",
 		"-b:a",
@@ -35,23 +37,21 @@ var (
 		"-segment_time",
 		"10",
 		"-segment_list",
-		"outputlist.m3u8",
+		path.Join(pth, "outputlist.m3u8"),
 		"-segment_format",
 		"mpegts",
-		"", // 16
-		//"output%03d.ts",
+		path.Join(pth, "output%03d.ts"),
 	}
-)
+}
 
 func removeSpecialCharacters(input string) string {
 	result := reg.ReplaceAllString(input, "")
-	return strings.ToLowerSpecial(unicode.AzeriCase, result)
+	return strings.ToLower(result)
 }
 
 func init() {
 	flag.StringVar(&songsDirectory, "songs-directory", "processed", "The directory where the processed songs will be stored")
 	flag.StringVar(&port, "port", "8080", "The port where the server will listen")
-	flag.Parse()
 
 	repo = NewRepo()
 
@@ -85,6 +85,7 @@ func filter[T any](s []T, fn func(T) bool) []T {
 }
 
 func main() {
+	flag.Parse()
 	defer repo.Close()
 
 	r := mux.NewRouter()
@@ -109,7 +110,7 @@ func main() {
 		log.Panic(err)
 	}
 
-	logrus.SetOutput(app.logs) // set the output to the logs window
+	logrus.SetOutput(app.Logs) // set the output to the logs window
 	if err := app.ui.Run(); err != nil {
 		log.Panic(err)
 	}
