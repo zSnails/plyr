@@ -20,6 +20,27 @@ var (
 	songsDirectory string
 	port           string
 	app            *App
+
+	ffmpegCommand = []string{
+		"-i",
+		"", // 1
+		"-c:a",
+		"libmp3lame",
+		"-b:a",
+		"128k",
+		"-map",
+		"0:0",
+		"-f",
+		"segment",
+		"-segment_time",
+		"10",
+		"-segment_list",
+		"outputlist.m3u8",
+		"-segment_format",
+		"mpegts",
+		"", // 16
+		//"output%03d.ts",
+	}
 )
 
 func removeSpecialCharacters(input string) string {
