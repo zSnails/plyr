@@ -13,7 +13,7 @@ func loggerMW(h http.Handler) http.Handler {
 			"remote-address": r.RemoteAddr,
 			"request-uri":    r.RequestURI,
 			"user-agent":     r.Header.Get("User-Agent"),
-		}).Info()
+		}).Info("Something in the way")
 		h.ServeHTTP(w, r)
 	})
 }

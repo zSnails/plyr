@@ -1,14 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
 	"flag"
-	"fmt"
-	"io"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 	"unicode"
@@ -23,6 +19,7 @@ var (
 	repo           SongRepo
 	songsDirectory string
 	port           string
+	app            *App
 )
 
 func removeSpecialCharacters(input string) string {
@@ -35,9 +32,12 @@ func init() {
 	flag.StringVar(&port, "port", "8080", "The port where the server will listen")
 	flag.Parse()
 
-	logrus.SetLevel(logrus.DebugLevel)
-	logrus.SetOutput(os.Stdout)
 	repo = NewRepo()
+
+	app = newApp()
+
+	app.SetSongRepo(&repo)
+	logrus.SetLevel(logrus.DebugLevel)
 
 	sql.Register("sqlite3_custom", &sqlite3.SQLiteDriver{
 		ConnectHook: func(conn *sqlite3.SQLiteConn) error {
@@ -79,35 +79,46 @@ func main() {
 	ctx := context.Background()
 
 	log := logrus.WithContext(ctx)
-
 	go func() {
 		log.Fatal(http.ListenAndServe(":"+port, r))
 	}()
-	inputReader := bufio.NewReader(os.Stdin)
-	for { // Server menu
-		fmt.Print(">>> ")
-		line, err := inputReader.ReadString('\n')
-		if err == io.EOF {
-			fmt.Println()
-			break
-		} else if err != nil {
-			logrus.Panic(err)
-		}
 
-		r := regexp.MustCompile(`[^\s"]+|"([^"]*)"`)
-		commandLine := r.FindAllString(line, -1)
-		if len(commandLine) == 0 {
-			continue // Skip empty line
-		}
-
-		// TODO: implement an actual command line, the original idea was to
-		// parse the command line and extract its arguments, however I got
-		// carried away and didn't actually do that
-		err = eval(ctx, commandLine, inputReader)
-		if err != nil {
-			log.Error(err)
-		}
+	err := app.CacheSongs()
+	if err != nil {
+		log.Panic(err)
 	}
+
+	logrus.SetOutput(app.logs) // set the output to the logs window
+	if err := app.ui.Run(); err != nil {
+		log.Panic(err)
+	}
+
+	// inputReader := bufio.NewReader(os.Stdin)
+	// for { // Server menu
+	// 	fmt.Print(">>> ")
+	// 	line, err := inputReader.ReadString('\n')
+	// 	if err == io.EOF {
+	// 		fmt.Println()
+	// 		break
+	// 	} else if err != nil {
+	// 		logrus.Panic(err)
+	// 	}
+
+	// 	r := regexp.MustCompile(`[^\s"]+|"([^"]*)"`)
+	// 	commandLine := r.FindAllString(line, -1)
+	// 	if len(commandLine) == 0 {
+	// 		continue // Skip empty line
+	// 	}
+
+	// 	// TODO: implement an actual command line, the original idea was to
+	// 	// parse the command line and extract its arguments, however I got
+	// 	// carried away and didn't actually do that
+	// 	err = eval(ctx, commandLine, inputReader)
+	// 	if err != nil {
+	// 		log.Error(err)
+	// 	}
+	// }
+
 }
 
 // NOTE: future self, the reason I'm not using a named parameter here is
