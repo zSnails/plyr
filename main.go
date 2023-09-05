@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"flag"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"path"
 	"regexp"
 	"strings"
@@ -19,6 +23,7 @@ var (
 	repo           SongRepo
 	songsDirectory string
 	port           string
+	isTui          bool
 	app            *App
 )
 
@@ -52,12 +57,10 @@ func removeSpecialCharacters(input string) string {
 func init() {
 	flag.StringVar(&songsDirectory, "songs-directory", "processed", "The directory where the processed songs will be stored")
 	flag.StringVar(&port, "port", "8080", "The port where the server will listen")
+	flag.BoolVar(&isTui, "tui", false, "Whether or not to start a tui environment")
 
 	repo = NewRepo()
 
-	app = newApp()
-
-	app.SetSongRepo(&repo)
 	logrus.SetLevel(logrus.DebugLevel)
 
 	sql.Register("sqlite3_custom", &sqlite3.SQLiteDriver{
@@ -105,41 +108,47 @@ func main() {
 		log.Fatal(http.ListenAndServe(":"+port, r))
 	}()
 
-	err := app.CacheSongs()
-	if err != nil {
-		log.Panic(err)
+	if isTui {
+		app = newApp()
+		app.SetSongRepo(&repo)
+		err := app.CacheSongs()
+		if err != nil {
+			log.Panic(err)
+		}
+
+		logrus.SetOutput(app.Logs) // set the output to the logs window
+		if err := app.ui.Run(); err != nil {
+			log.Panic(err)
+		}
+
+		return
 	}
 
-	logrus.SetOutput(app.Logs) // set the output to the logs window
-	if err := app.ui.Run(); err != nil {
-		log.Panic(err)
+	inputReader := bufio.NewReader(os.Stdin)
+	for { // Server menu
+		fmt.Print(">>> ")
+		line, err := inputReader.ReadString('\n')
+		if err == io.EOF {
+			fmt.Println()
+			break
+		} else if err != nil {
+			logrus.Panic(err)
+		}
+
+		r := regexp.MustCompile(`[^\s"]+|"([^"]*)"`)
+		commandLine := r.FindAllString(line, -1)
+		if len(commandLine) == 0 {
+			continue // Skip empty line
+		}
+
+		// TODO: implement an actual command line, the original idea was to
+		// parse the command line and extract its arguments, however I got
+		// carried away and didn't actually do that
+		err = eval(ctx, commandLine, inputReader)
+		if err != nil {
+			log.Error(err)
+		}
 	}
-
-	// inputReader := bufio.NewReader(os.Stdin)
-	// for { // Server menu
-	// 	fmt.Print(">>> ")
-	// 	line, err := inputReader.ReadString('\n')
-	// 	if err == io.EOF {
-	// 		fmt.Println()
-	// 		break
-	// 	} else if err != nil {
-	// 		logrus.Panic(err)
-	// 	}
-
-	// 	r := regexp.MustCompile(`[^\s"]+|"([^"]*)"`)
-	// 	commandLine := r.FindAllString(line, -1)
-	// 	if len(commandLine) == 0 {
-	// 		continue // Skip empty line
-	// 	}
-
-	// 	// TODO: implement an actual command line, the original idea was to
-	// 	// parse the command line and extract its arguments, however I got
-	// 	// carried away and didn't actually do that
-	// 	err = eval(ctx, commandLine, inputReader)
-	// 	if err != nil {
-	// 		log.Error(err)
-	// 	}
-	// }
 
 }
 
