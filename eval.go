@@ -14,17 +14,19 @@ import (
 	"github.com/dhowden/tag"
 	"github.com/google/uuid"
 	"github.com/hajimehoshi/go-mp3"
+	"github.com/lithammer/fuzzysearch/fuzzy"
 	"github.com/sirupsen/logrus"
+	"github.com/zSnails/plyr/storage"
 )
 
-func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err error) {
+func eval(ctx context.Context, commandLine string, reader *bufio.Reader) (err error) {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	log := logrus.WithContext(ctx).WithField("command", commandLine[0])
+	log := logrus.WithContext(ctx).WithField("command", commandLine)
 
-	switch commandLine[0] {
+	switch commandLine {
 	case "add":
 
 		fmt.Print("File> ")
@@ -102,7 +104,7 @@ func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err 
 
 		command := buildFfmpegCommand(p, filename)
 
-		song := SongData{
+		song := storage.SongData{
 			Title:    songname,
 			Artist:   artist,
 			Hash:     id.String(),
@@ -130,6 +132,7 @@ func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err 
 				log.Info("An error occurred, cancelling...")
 				return err
 			}
+			cache.StoreIfNotExists(song.Hash, &song)
 		}
 
 		log.Info("Committing transaction...")
@@ -137,7 +140,7 @@ func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err 
 
 	case "delete": // WARNING: hard deletions
 		log.Warn("This action is irreversible. Be careful!")
-		err := eval(ctx, []string{"all"}, reader)
+		err := eval(ctx, "all", reader)
 		if err != nil {
 			return err
 		}
@@ -152,26 +155,20 @@ func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err 
 			return err
 		}
 
-		tx, row, err := repo.FindById(ctx, int64(uid))
-		if err != nil {
-			return err
-		}
-		var found SongData
+		songs := cache.Filter(func(v *storage.SongData) bool {
+			return v.Id == int64(uid)
+		})
 
-		err = found.FromRow(row)
-		if err != nil {
-			return err
+		var found *storage.SongData
+		if len(songs) > 0 {
+			found = songs[0]
 		}
 
-		err = tx.Commit()
+		tx, res, err := repo.Delete(ctx, *found)
 		if err != nil {
 			return err
 		}
 
-		tx, res, err := repo.Delete(ctx, found)
-		if err != nil {
-			return err
-		}
 		defer tx.Commit()
 
 		affected, err := res.RowsAffected()
@@ -181,6 +178,7 @@ func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err 
 
 		if affected > 0 {
 			log.Info("Song deleted from database. Deleting local files.")
+			cache.Delete(found.Hash)
 			localPath := path.Join(songsDirectory, found.Hash)
 			log.WithField("local-path", localPath).Println()
 			err = os.RemoveAll(localPath)
@@ -192,7 +190,7 @@ func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err 
 		}
 
 	case "toggle": // deletions are soft, no need for hard deletions
-		err := eval(ctx, []string{"all"}, reader)
+		err := eval(ctx, "all", reader)
 		if err != nil {
 			return err
 		}
@@ -208,24 +206,19 @@ func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err 
 			return err
 		}
 
-		tx, row, err := repo.FindById(ctx, int64(uid))
-		if err != nil {
-			return err
-		}
-		var found SongData
+		songs := cache.Filter(func(v *storage.SongData) bool {
+			return v.Id == int64(uid)
+		})
 
-		err = found.FromRow(row)
-		if err != nil {
-			return err
+		var found *storage.SongData
+		if len(songs) < 1 {
+			return nil
 		}
 
-		err = tx.Commit()
-		if err != nil {
-			return err
-		}
+		found = songs[0]
 
 		found.Deleted = !found.Deleted
-		tx, res, err := repo.Update(ctx, found)
+		tx, res, err := repo.Update(ctx, *found)
 		if err != nil {
 			return err
 		}
@@ -243,26 +236,9 @@ func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err 
 		log.WithField("affected-rows", affected).Info("Done.")
 
 	case "all":
-		tx, rows, err := repo.All(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Commit()
-
-		err = rows.Err()
-		if err != nil {
-			return err
-		}
-
-		songs, err := makeSongDataSlice(rows)
-		if err != nil {
-			return err
-		}
-
-		for _, song := range songs {
+		for _, song := range cache.All() {
 			fmt.Println(song)
 		}
-
 	case "find":
 		fmt.Print("Query> ")
 
@@ -273,22 +249,10 @@ func eval(ctx context.Context, commandLine []string, reader *bufio.Reader) (err 
 
 		query = strings.TrimSuffix(query, "\n")
 
-		tx, rows, err := repo.FindAlike(ctx, query)
-		if err != nil {
-			return err
-		}
-
-		defer tx.Commit()
-
-		err = rows.Err()
-		if err != nil {
-			return err
-		}
-
-		songs, err := makeSongDataSlice(rows)
-		if err != nil {
-			return err
-		}
+		songs := cache.Filter(func(sd *storage.SongData) bool {
+			return fuzzy.Match(removeSpecialCharacters(query), removeSpecialCharacters(sd.Title+sd.Artist)) ||
+				sd.Hash == query
+		})
 
 		for _, song := range songs {
 			fmt.Println(song)
