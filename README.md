@@ -8,6 +8,6 @@ That's all the readme, I don't really care about this.
 
 # TODO
 
-[X] - Store song length
+- [X] Store song length
 
-[ ] - Store song cover art
+- [ ] Store song cover art
