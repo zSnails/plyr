@@ -21,29 +21,20 @@ func loggerMW(h http.Handler) http.Handler {
 func deletedMW(h http.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		// Check if the song has been deleted, if so then don't allow access to it
+
 		vars := mux.Vars(r)
-		log := logrus.WithContext(r.Context()).WithField("hash", vars["hash"])
+		hash := vars["hash"]
+		log := logrus.WithContext(r.Context()).WithField("hash", hash)
 
-		tx, row, err := repo.FindByHash(r.Context(), vars["hash"])
-		if err != nil {
-			log.Error(err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		defer tx.Commit()
-
-		var song SongData
-		err = song.FromRow(row)
-		if err != nil {
-			log.Error(err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		if song.Deleted {
+		song := cache.Get(hash)
+		if song != nil && song.Deleted {
 			log.Warnf("Trying to access a deleted song.")
+			w.WriteHeader(http.StatusGone)
+			return
+		}
+
+		if song == nil {
+			log.Warnf("Trying to access an unknown song")
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}

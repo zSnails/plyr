@@ -14,23 +14,12 @@ import (
 	"github.com/lithammer/fuzzysearch/fuzzy"
 	"github.com/rivo/tview"
 	"github.com/sirupsen/logrus"
+	"github.com/zSnails/plyr/storage"
 )
 
 type App struct {
 	ui *tview.Application
 	*State
-}
-
-type State struct {
-	CachedSongs  []SongData
-	Pages        *tview.Pages
-	SongsList    *tview.List
-	SongsFlexBox *tview.Flex
-	SongsForm    *tview.Form
-	Flex         *tview.Flex
-	Logs         *tview.TextView
-	Repo         *SongRepo
-	app          *App
 }
 
 func (a *App) OnInput(event *tcell.EventKey) *tcell.EventKey {
@@ -93,7 +82,7 @@ func (a *App) AddSongModal(filename string) {
 	samples := decoder.Length() / 4
 	duration := samples / int64(decoder.SampleRate())
 
-	song := SongData{
+	song := storage.SongData{
 		Duration: duration,
 		Deleted:  false,
 	}
@@ -165,54 +154,26 @@ func (a *App) AddSongModal(filename string) {
 			log.Info("Created local processed files.")
 			log.Debug("Adding new song to songs cache.")
 			a.AddSong(song)
+			a.Cache.StoreIfNotExists(song.Hash, &song)
 		}
 
 		log.Info("Done!")
 	})
 }
 
-func (s *State) SetSongRepo(repo *SongRepo) {
-	s.Repo = repo
-}
-
-func (s *State) CacheSongs() error {
-	tx, rows, err := s.Repo.All(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Commit()
-	for rows.Next() {
-		var sd SongData
-		sd.FromRow(rows)
-		s.AddSong(sd)
-	}
-	return nil
-}
-
-func (s *State) AddSong(song SongData) {
-	s.CachedSongs = append(s.CachedSongs, song)
-	s.SongsAppend(song)
-}
-
-func (s *State) SongsAppend(song SongData) {
-	s.SongsList.AddItem(fmt.Sprintf("%s - %s", song.Artist, song.Title), song.Hash, rune(song.Title[0]), func() {
-		s.app.DeleteSongModal(song)
-	})
-}
-
-// The filter songs function does a fuzzy search
-func (s *State) FilterSongs(query string) {
-	results := filter(s.CachedSongs, func(sd SongData) bool {
-		return fuzzy.Match(removeSpecialCharacters(query), removeSpecialCharacters(sd.Title+sd.Artist))
+func (s *App) FilterSongs(query string) {
+	results := s.State.Cache.Filter(func(sd *storage.SongData) bool {
+		return fuzzy.Match(removeSpecialCharacters(query), removeSpecialCharacters(sd.Title+sd.Artist)) ||
+			sd.Hash == query
 	})
 
 	s.SongsList.Clear()
 	for _, song := range results {
-		s.SongsAppend(song)
+		s.SongsAppend(*song)
 	}
 }
 
-func (s *App) DeleteSongModal(song SongData) {
+func (s *App) DeleteSongModal(song storage.SongData) {
 	modal := tview.NewModal()
 	modal.SetTitle("Importante!")
 	modal.SetText("Seguro que quieres borrar esta canción?")
@@ -221,26 +182,28 @@ func (s *App) DeleteSongModal(song SongData) {
 		if buttonIndex == 1 {
 			s.Pages.SwitchToPage("Songs")
 			s.Pages.RemovePage("modal")
+			return
 		}
 		s.Repo.Delete(context.Background(), song)
+		s.Cache.Delete(song.Hash)
 	})
 	s.Pages.AddPage("modal", modal, true, true)
 	s.Pages.SwitchToPage("modal")
 }
 
-func newApp() *App {
+func newApp(cache *storage.Cache[string, storage.SongData]) *App {
 
 	app := &App{
 		ui: tview.NewApplication(),
 		State: &State{
-			CachedSongs:  []SongData{},
 			Pages:        tview.NewPages(),
+			Cache:        cache,
 			SongsFlexBox: tview.NewFlex(),
 			SongsList:    tview.NewList(),
 			SongsForm:    tview.NewForm(),
 			Flex:         tview.NewFlex(),
 			Logs:         tview.NewTextView(),
-			Repo:         &SongRepo{},
+			Repo:         &storage.SongRepo{},
 		},
 	}
 
@@ -285,7 +248,11 @@ func newApp() *App {
 	app.Flex.AddItem(app.Logs, 0, 2, false)
 	app.ui.SetRoot(app.Flex, true)
 
-	app.State.app = app
+	app.State.App = app
+
+	for _, song := range app.Cache.All() {
+		app.AddSong(*song)
+	}
 
 	return app
 }
