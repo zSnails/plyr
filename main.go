@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"path"
 	"regexp"
 	"strings"
@@ -16,11 +17,13 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/mattn/go-sqlite3"
 	"github.com/sirupsen/logrus"
+	"github.com/zSnails/plyr/storage"
 )
 
 var (
 	reg            = regexp.MustCompile(`[^a-zA-Z0-9áéíóúÁÉÍÓÚ]`)
-	repo           SongRepo
+	repo           storage.SongRepo
+	cache          storage.Cache[string, storage.SongData]
 	songsDirectory string
 	port           string
 	isTui          bool
@@ -59,7 +62,8 @@ func init() {
 	flag.StringVar(&port, "port", "8080", "The port where the server will listen")
 	flag.BoolVar(&isTui, "tui", false, "Whether or not to start a tui environment")
 
-	repo = NewRepo()
+	repo = storage.NewRepo()
+	cache = storage.NewCache[string, storage.SongData]()
 
 	logrus.SetLevel(logrus.DebugLevel)
 
@@ -77,23 +81,38 @@ func init() {
 	}
 }
 
-func filter[T any](s []T, fn func(T) bool) []T {
-	result := []T{}
-	for _, elem := range s {
-		if fn(elem) {
-			result = append(result, elem)
-		}
+func CacheSongs(cache *storage.Cache[string, storage.SongData]) error {
+	tx, rows, err := repo.All(context.Background())
+	if err != nil {
+		return err
 	}
-	return result
+
+	defer tx.Commit()
+	for rows.Next() {
+		var song storage.SongData
+		song.FromRow(rows)
+		cache.StoreIfNotExists(song.Hash, &song)
+	}
+	return nil
 }
 
 func main() {
 	flag.Parse()
 	defer repo.Close()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	c := make(chan os.Signal)
+	signal.Notify(c, os.Kill, os.Interrupt)
+
+	go func() {
+		<-c
+		cancel()
+		os.Exit(0)
+	}()
+
 	r := mux.NewRouter()
 
-	s := r.PathPrefix("/song").Subrouter()
+	s := r.PathPrefix("/api/song").Subrouter()
 	{
 		s.HandleFunc("", allSongs)
 		s.HandleFunc("/{songName}", songHandler)
@@ -101,68 +120,43 @@ func main() {
 	s.Use(loggerMW)
 	r.Handle("/{hash}/{file}", deletedMW(http.FileServer(http.Dir(songsDirectory))))
 
-	ctx := context.Background()
-
 	log := logrus.WithContext(ctx)
 	go func() {
 		log.Fatal(http.ListenAndServe(":"+port, r))
 	}()
 
-	if isTui {
-		app = newApp()
-		app.SetSongRepo(&repo)
-		err := app.CacheSongs()
-		if err != nil {
-			log.Panic(err)
-		}
+	err := CacheSongs(&cache)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-		logrus.SetOutput(app.Logs) // set the output to the logs window
+	if isTui {
+		app = newApp(&cache)
+		app.SetSongRepo(&repo)
+
+		log.Logger.SetOutput(app.Logs) // set the output to the logs window
 		if err := app.ui.Run(); err != nil {
 			log.Panic(err)
 		}
 
-		return
-	}
+	} else {
+		inputReader := bufio.NewReader(os.Stdin)
+		for { // Server menu
+			fmt.Print(">>> ")
+			line, err := inputReader.ReadString('\n')
+			if err == io.EOF {
+				fmt.Println()
+				break
+			} else if err != nil {
+				log.Panic(err)
+			}
 
-	inputReader := bufio.NewReader(os.Stdin)
-	for { // Server menu
-		fmt.Print(">>> ")
-		line, err := inputReader.ReadString('\n')
-		if err == io.EOF {
-			fmt.Println()
-			break
-		} else if err != nil {
-			logrus.Panic(err)
-		}
+			line = strings.Fields(strings.TrimSuffix(line, "\n"))[0]
 
-		r := regexp.MustCompile(`[^\s"]+|"([^"]*)"`)
-		commandLine := r.FindAllString(line, -1)
-		if len(commandLine) == 0 {
-			continue // Skip empty line
-		}
-
-		// TODO: implement an actual command line, the original idea was to
-		// parse the command line and extract its arguments, however I got
-		// carried away and didn't actually do that
-		err = eval(ctx, commandLine, inputReader)
-		if err != nil {
-			log.Error(err)
+			err = eval(ctx, line, inputReader)
+			if err != nil {
+				log.Error(err)
+			}
 		}
 	}
-
-}
-
-// NOTE: future self, the reason I'm not using a named parameter here is
-// because the marshaler will default to null and I don't want that
-func makeSongDataSlice(rows *sql.Rows) ([]SongData, error) {
-	result := []SongData{}
-	for rows.Next() {
-		var songData SongData
-		err := songData.FromRow(rows)
-		if err != nil {
-			return result, err
-		}
-		result = append(result, songData)
-	}
-	return result, nil
 }
