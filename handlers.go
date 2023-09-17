@@ -14,7 +14,7 @@ import (
 )
 
 func allSongs(w http.ResponseWriter, r *http.Request) {
-	log := log.WithContext(r.Context())
+	log := log.WithContext(r.Context()).WithField("handler", "all-songs")
 
 	songs := cache.All()
 
@@ -29,14 +29,15 @@ func allSongs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Debug("Sending song data")
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, "%s", data)
 }
 
-func songHandler(w http.ResponseWriter, r *http.Request) {
+func songQuery(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	query, err := url.QueryUnescape(vars["songName"])
-	log := log.WithContext(r.Context()).WithField("song-name", query)
+	log := log.WithContext(r.Context()).WithField("song-name", query).WithField("handler", "song-query")
 	if err != nil {
 		log.Error(err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -54,6 +55,7 @@ func songHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+	log.Debug("Sending song data")
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, "%s", data)
 }

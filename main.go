@@ -112,13 +112,13 @@ func main() {
 
 	r := mux.NewRouter()
 
-	s := r.PathPrefix("/api/song").Subrouter()
+	s := r.PathPrefix("/api/songs").Subrouter()
 	{
-		s.HandleFunc("", allSongs)
-		s.HandleFunc("/{songName}", songHandler)
+		s.HandleFunc("/", allSongs)
+		s.HandleFunc("/{songName}", songQuery)
 	}
-	s.Use(loggerMW)
 	r.Handle("/{hash}/{file}", deletedMW(http.FileServer(http.Dir(songsDirectory))))
+	r.Use(loggerMW)
 
 	log := logrus.WithContext(ctx)
 	go func() {
