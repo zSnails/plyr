@@ -30,7 +30,7 @@ docker run -it -p 8080:8080 plyr
 
 ```bash
 # Copy songs to container
-docker cp <song> <container_id>:/songs
+docker cp <song> <container_id>:/app/songs
 
 # If container is stopped, start it
 docker start <container_id>
@@ -39,5 +39,6 @@ docker start <container_id>
 docker attach <container_id>
 
 # Now use add command for each song
-add
+>>> add
+File> /app/songs/<song>
 ```
