@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:bookworm AS builder
+FROM golang:1.21-bookworm AS builder
 WORKDIR /app
 COPY . .
 RUN go build -o plyr .
@@ -8,7 +8,5 @@ RUN go build -o plyr .
 FROM ubuntu:22.04
 WORKDIR /app
 COPY --from=builder /app/plyr .
-COPY processed/ ./processed/
-COPY data.sqlite .
 EXPOSE 8080
 CMD ["./plyr"]
