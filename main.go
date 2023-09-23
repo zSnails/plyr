@@ -151,9 +151,12 @@ func main() {
 				log.Panic(err)
 			}
 
-			line = strings.Fields(strings.TrimSuffix(line, "\n"))[0]
+			cmds := strings.Fields(strings.TrimSuffix(line, "\n"))
+            if len(cmds) == 0 {
+                continue
+            }
 
-			err = eval(ctx, line, inputReader)
+			err = eval(ctx, cmds[0], inputReader)
 			if err != nil {
 				log.Error(err)
 			}
